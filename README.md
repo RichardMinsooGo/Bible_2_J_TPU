@@ -1,3 +1,12 @@
+Cobergence Rate
+
+	GREEN  : Good convergence
+	Yellow : it takes time for convergence
+	ORANGE : Bad convergence
+	RED    : Program BUG
+	TBT    : To be tested
+
+
 Architecture of repositories
 
 Machine_Learning_Session_1_Basics
