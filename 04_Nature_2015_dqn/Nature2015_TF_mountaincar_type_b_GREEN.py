@@ -14,12 +14,15 @@ import matplotlib.pyplot as plt
 env_name = "MountainCar-v0"
 env = gym.make(env_name)
 env.seed(1)     # reproducible, general Policy gradient has high variance
+np.random.seed(123)
+tf.set_random_seed(456)  # reproducible
+
 env = env.unwrapped
 
 state_size = env.observation_space.shape[0]
 action_size = env.action_space.n
 
-target_update_cycle = 1
+target_update_cycle = 200
 
 model_path = os.path.join(os.getcwd(), 'save_model')
 graph_path = os.path.join(os.getcwd(), 'save_graph')
@@ -156,7 +159,7 @@ def main():
             state = env.reset()
             state = np.reshape(state, [1, state_size])
 
-            while not done and score < 30000:
+            while not done and score < 10000:
                 if agent.render:
                     env.render()        
                 action = agent.get_action(state)
@@ -164,6 +167,7 @@ def main():
                 # 선택한 액션으로 1 step을 시행한다
                 next_state, reward, done, _ = env.step(action)
 
+                """
                 #If the car pulls back on the left or right hill he gets a reward of +20
                 if next_state[1] > state[0][1] and next_state[1]>0 and state[0][1]>0:
                     reward = 20
@@ -174,32 +178,34 @@ def main():
                     reward += 10000
                 else:
                     reward += -25
-
+                """
+                
                 score += 1
                 next_state = np.reshape(next_state, [1, state_size])
                 agent.append_sample(state, action, reward, next_state, done)
                 state = next_state
 
-                if done or score == 30000:
+                if done or score == 10000:
                     print ("Exploration / ","epsilon: {:2.5f}".format(agent.epsilon),
                            ", score: ",score)
                     break
         
         print ("\n\n Exploration Start!!!! \n\n")
-        while time.time() - start_time < 15*60:
+        while time.time() - start_time < 29*60:
             done = False
             score = 0
             state = env.reset()
             state = np.reshape(state, [1, state_size])
             
-            while not done and score < 30000:
+            while not done and score < 10000:
                 if agent.render:
                     env.render()        
                 action = agent.get_action(state)
                 
                 # 선택한 액션으로 1 step을 시행한다
                 next_state, reward, done, _ = env.step(action)
-
+                
+                """
                 #If the car pulls back on the left or right hill he gets a reward of +20
                 if next_state[1] > state[0][1] and next_state[1]>0 and state[0][1]>0:
                     reward = 20
@@ -210,28 +216,30 @@ def main():
                     reward += 10000
                 else:
                     reward += -25
-
+                """
+                
                 score += 1
                 next_state = np.reshape(next_state, [1, state_size])
                 agent.append_sample(state, action, reward, next_state, done)
                 state = next_state
+                
+                # if done or score % 10 == 0:
                 train_model(agent, target_agent)
-
-                if done or score == 30000:
+                if done or score % target_update_cycle == 0:
+                    # return# copy q_net --> target_net
+                    sess.run(copy_ops)
+                            
+                if done or score == 10000:
                     episode += 1
                     scores.append(score)
-                    if score < 200 :
-                        agent.render = True
+                    # if score < 200 :
+                    #     agent.render = True
                         
-                    if episode % target_update_cycle == 0:
-                        # return# copy q_net --> target_net
-                        sess.run(copy_ops)
-                            
-                    print ("episode: {:>4}".format(episode),", epsilon: {:2.5f}".format(agent.epsilon),
-                           ", score: ",score)
-                    
-                    if np.mean(scores[-min(30, len(scores)):]) < 300:
-                        save_path = saver.save(sess, model_path + "/MountainCar_DQN.ckpt")
+                    print ("Run: {:>4}".format(episode),"/ epsilon: {:2.5f}".format(agent.epsilon),
+                           "/ score: {:>5}".format(score))
+                    if np.mean(scores[-min(30, len(scores)):]) < 200:
+                        e = int(time.time() - start_time)
+                        print('Elasped time :{:02d}:{:02d}:{:02d}'.format(e // 3600, (e % 3600 // 60), e % 60))
                         sys.exit()
                     break
                 
