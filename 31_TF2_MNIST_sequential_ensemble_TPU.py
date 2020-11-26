@@ -26,13 +26,13 @@ strategy = tf.distribute.experimental.TPUStrategy(resolver)
 learning_rate = 0.001
 
 ## MNIST Dataset #########################################################
-mnist = tf.keras.datasets.mnist
-class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+# mnist = tf.keras.datasets.mnist
+# class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
 ##########################################################################
 
 ## Fashion MNIST Dataset #################################################
-# mnist = tf.keras.datasets.fashion_mnist
-# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+mnist = tf.keras.datasets.fashion_mnist
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 ##########################################################################
 
 (X_train, Y_train), (X_test, Y_test) = mnist.load_data()    
@@ -102,29 +102,31 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 #     checkpoints.append(tf.train.Checkpoint(cnn=models[m]))
 
 with strategy.scope():
-    model = model
+    models = []
+    num_models = 3
+    for m in range(num_models):
+        models.append(model)
 
-    @tf.function
     def loss_fn(model, images, labels):
         logits = model(images, training=True)
         loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(
             y_pred=logits, y_true=labels, from_logits=True))    
         return loss   
 
-    @tf.function
     def grad(model, images, labels):
         with tf.GradientTape() as tape:
             loss = loss_fn(model, images, labels)
         return tape.gradient(loss, model.variables)
 
-    @tf.function
-    def evaluate(model, images, labels):
-        logits = model(images, training=False)
-        correct_prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(labels, 1))
+    def evaluate(models, images, labels):
+        predictions = np.zeros_like(labels)
+        for model in models:
+            logits = model(images, training=False)
+            predictions += logits
+        correct_prediction = tf.equal(tf.argmax(predictions, 1), tf.argmax(labels, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
         return accuracy
 
-    @tf.function
     def train(model, images, labels):
         grads = grad(model, images, labels)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
@@ -140,21 +142,23 @@ for epoch in range(EPOCHS):
     test_step = 0    
     
     for images, labels in train_ds:
-        train(model, images, labels)
-        #grads = grad(model, images, labels)                
-        #optimizer.apply_gradients(zip(grads, model.variables))
-        loss = loss_fn(model, images, labels)
-        train_loss += loss
-        acc = evaluate(model, images, labels)
+        for model in models:
+            train(model, images, labels)
+            # grads = grad(model, images, labels)                
+            # optimizer.apply_gradients(zip(grads, model.variables))
+            loss = loss_fn(model, images, labels)
+            train_loss += loss / num_models
+        acc = evaluate(models, images, labels)
         train_accuracy += acc
         train_step += 1
     train_loss = train_loss / train_step
     train_accuracy = train_accuracy / train_step
     
     for test_images, test_labels in test_ds:
-        loss = loss_fn(model, test_images, test_labels)
-        test_loss += loss
-        acc = evaluate(model, test_images, test_labels)        
+        for model in models:
+            loss = loss_fn(model, test_images, test_labels)
+            test_loss += loss
+        acc = evaluate(models, test_images, test_labels)        
         test_accuracy += acc
         test_step += 1
     test_loss = test_loss / test_step

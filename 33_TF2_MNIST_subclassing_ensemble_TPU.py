@@ -3,6 +3,7 @@ from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, Dropout
 from tensorflow.keras import Model, Sequential
 
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras import Input
 import numpy as np
 
 import os
@@ -31,8 +32,8 @@ class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
 ##########################################################################
 
 ## Fashion MNIST Dataset #################################################
-# mnist = tf.keras.datasets.fashion_mnist
-# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+#mnist = keras.datasets.fashion_mnist
+#class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 ##########################################################################
 
 (X_train, Y_train), (X_test, Y_test) = mnist.load_data()    
@@ -62,38 +63,27 @@ train_ds = tf.data.Dataset.from_tensor_slices(
 test_ds = tf.data.Dataset.from_tensor_slices(
     (X_test, Y_test)).batch(batch_size)
 
-"""
-def create_model():
-    model = Sequential()
-    
-    model.add(Conv2D(filters=64, kernel_size=3, activation=tf.nn.relu, padding='SAME', 
-                                  input_shape=(28, 28, 1)))
-    model.add(MaxPool2D(padding='SAME'))
-        
-    model.add(Conv2D(filters=128, kernel_size=3, activation=tf.nn.relu, padding='SAME'))
-    model.add(MaxPool2D(padding='SAME'))
-    
-    model.add(Flatten())
-    model.add(Dense(128, activation=tf.nn.relu))
-    model.add(Dropout(0.4))
-    model.add(Dense(10, activation=tf.nn.softmax))
-    
-    return model
-
-model = create_model()
-"""
-model = Sequential([
-    Conv2D(filters=64, kernel_size=3, activation=tf.nn.relu, padding='SAME',input_shape=(28, 28, 1)),
-    MaxPool2D(padding='SAME'),
-    Conv2D(filters=128, kernel_size=3, activation=tf.nn.relu, padding='SAME'),
-    MaxPool2D(padding='SAME'),
-    Flatten(),
-    Dense(128, activation='relu'),
-    Dropout(0.2),
-    Dense(10, activation='softmax')
-])
-
-model.summary()
+class MNISTModel(tf.keras.Model):
+    def __init__(self):
+        super(MNISTModel, self).__init__()
+        self.conv1 = Conv2D(filters=64, kernel_size=[3, 3], padding='SAME', activation=tf.nn.relu)
+        self.pool1 = MaxPool2D(padding='SAME')
+        self.conv2 = Conv2D(filters=128, kernel_size=[3, 3], padding='SAME', activation=tf.nn.relu)
+        self.pool2 = MaxPool2D(padding='SAME')
+        self.pool3_flat = Flatten()
+        self.dense4 = Dense(units=128, activation=tf.nn.relu)
+        self.drop4 = Dropout(rate=0.4)
+        self.dense5 = Dense(10, activation='softmax')
+    def call(self, inputs, training=False):
+        net = self.conv1(inputs)
+        net = self.pool1(net)
+        net = self.conv2(net)
+        net = self.pool2(net)
+        net = self.pool3_flat(net)
+        net = self.dense4(net)
+        net = self.drop4(net)
+        net = self.dense5(net)
+        return net
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
@@ -102,29 +92,32 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 #     checkpoints.append(tf.train.Checkpoint(cnn=models[m]))
 
 with strategy.scope():
-    model = model
+    models = []
+    num_models = 3
+    for m in range(num_models):
+        models.append(model)
 
-    @tf.function
     def loss_fn(model, images, labels):
+
         logits = model(images, training=True)
         loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(
-            y_pred=logits, y_true=labels, from_logits=True))    
+            y_pred=logits, y_true=labels, from_logits=True))
         return loss   
 
-    @tf.function
     def grad(model, images, labels):
         with tf.GradientTape() as tape:
             loss = loss_fn(model, images, labels)
         return tape.gradient(loss, model.variables)
 
-    @tf.function
-    def evaluate(model, images, labels):
-        logits = model(images, training=False)
-        correct_prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(labels, 1))
+    def evaluate(models, images, labels):
+        predictions = np.zeros_like(labels)
+        for model in models:
+            logits = model(images, training=False)
+            predictions += logits
+        correct_prediction = tf.equal(tf.argmax(predictions, 1), tf.argmax(labels, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
         return accuracy
 
-    @tf.function
     def train(model, images, labels):
         grads = grad(model, images, labels)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
@@ -140,21 +133,23 @@ for epoch in range(EPOCHS):
     test_step = 0    
     
     for images, labels in train_ds:
-        train(model, images, labels)
-        #grads = grad(model, images, labels)                
-        #optimizer.apply_gradients(zip(grads, model.variables))
-        loss = loss_fn(model, images, labels)
-        train_loss += loss
-        acc = evaluate(model, images, labels)
+        for model in models:
+            train(model, images, labels)
+            # grads = grad(model, images, labels)                
+            # optimizer.apply_gradients(zip(grads, model.variables))
+            loss = loss_fn(model, images, labels)
+            train_loss += loss / num_models
+        acc = evaluate(models, images, labels)
         train_accuracy += acc
         train_step += 1
     train_loss = train_loss / train_step
     train_accuracy = train_accuracy / train_step
     
     for test_images, test_labels in test_ds:
-        loss = loss_fn(model, test_images, test_labels)
-        test_loss += loss
-        acc = evaluate(model, test_images, test_labels)        
+        for model in models:
+            loss = loss_fn(model, test_images, test_labels)
+            test_loss += loss
+        acc = evaluate(models, test_images, test_labels)        
         test_accuracy += acc
         test_step += 1
     test_loss = test_loss / test_step
